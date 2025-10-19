@@ -1,7 +1,11 @@
 import React, { useMemo, useState } from "react";
 import type { Referral, SlotOption } from "../types";
 import { assessCompleteness, predictAuth, suggestSlots } from "../lib/ai";
-import { evalCompletenessLLM, evalAuthLLM } from "../lib/remote";
+import {
+  evalCompletenessLLM,
+  evalAuthLLM,
+  extractPdfText,
+} from "../lib/remote";
 import CoverageCard from "./CoverageCard";
 import { Badge } from "./Badges";
 
@@ -10,17 +14,19 @@ export default function ReferralDetail({
   lowConnectivity,
   onQueue,
   useLLM,
+  onUpdate,
 }: {
   referral: Referral;
   lowConnectivity: boolean;
   onQueue: (action: string) => void;
   useLLM?: boolean;
+  onUpdate?: (updated: Referral) => void;
 }) {
   const [comp, setComp] = useState(() => assessCompleteness(referral));
   const [auth, setAuth] = useState(() => predictAuth(referral));
   const slots = useMemo(() => suggestSlots(referral), [referral]);
-
   const [held, setHeld] = useState<SlotOption | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -51,6 +57,57 @@ export default function ReferralDetail({
     };
   }, [referral, useLLM]);
 
+  async function analyzePdf() {
+    try {
+      setBusy(true);
+      // pick the first PDF doc
+      const pdfDoc = referral.documents.find((d) => /\.pdf$/i.test(d.filename));
+      if (!pdfDoc) {
+        alert("No PDF attached.");
+        return;
+      }
+
+      // PDFs live in /public/docs
+      const path = `/docs/${pdfDoc.filename}`;
+      const text = await extractPdfText(path);
+      if (!text) {
+        alert("PDF extraction returned empty text.");
+        return;
+      }
+
+      // create an updated referral with the extracted text and higher confidence
+      const updated: Referral = {
+        ...referral,
+        documents: referral.documents.map((d) =>
+          d.id === pdfDoc.id
+            ? { ...d, text, confidence: Math.max(d.confidence, 0.98) }
+            : d
+        ),
+      };
+
+      // push up to the parent list
+      onUpdate?.(updated);
+
+      // re-run evaluation (LLM if enabled)
+      if (useLLM) {
+        const [c, a] = await Promise.all([
+          evalCompletenessLLM(updated),
+          evalAuthLLM(updated),
+        ]);
+        setComp(c);
+        setAuth(a);
+      } else {
+        setComp(assessCompleteness(updated));
+        setAuth(predictAuth(updated));
+      }
+    } catch (e: any) {
+      console.error("analyzePdf failed", e);
+      alert("Analyze PDF failed: " + (e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function holdSlot(s: SlotOption) {
     if (lowConnectivity) {
       onQueue(
@@ -64,19 +121,13 @@ export default function ReferralDetail({
   }
 
   function notifyReferrer() {
-    if (lowConnectivity) {
-      onQueue(`Fax to referrer: ${comp.draftReferrerAsk}`);
-    } else {
-      alert("Fax drafted (mock):\n" + comp.draftReferrerAsk);
-    }
+    if (lowConnectivity) onQueue(`Fax to referrer: ${comp.draftReferrerAsk}`);
+    else alert("Fax drafted (mock):\n" + comp.draftReferrerAsk);
   }
 
   function notifyPatient() {
-    if (lowConnectivity) {
-      onQueue(`SMS to patient: ${comp.draftPatientSMS}`);
-    } else {
-      alert("SMS drafted (mock):\n" + comp.draftPatientSMS);
-    }
+    if (lowConnectivity) onQueue(`SMS to patient: ${comp.draftPatientSMS}`);
+    else alert("SMS drafted (mock):\n" + comp.draftPatientSMS);
   }
 
   return (
@@ -108,7 +159,18 @@ export default function ReferralDetail({
             {referral.dx.join(", ")} · {referral.cpt.join(", ")}
           </div>
           <div className="muted">Docs</div>
-          <div>{referral.documents.map((d) => d.filename).join(", ")}</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {referral.documents.map((d) => (
+              <a
+                key={d.id}
+                href={`/docs/${d.filename}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {d.filename}
+              </a>
+            ))}
+          </div>
           <div className="muted">OCR confidence</div>
           <div>
             {Math.round(
@@ -116,6 +178,22 @@ export default function ReferralDetail({
             )}
             %
           </div>
+        </div>
+
+        <div className="section hstack" style={{ gap: 8 }}>
+          <button className="button" onClick={notifyReferrer}>
+            Fix & Notify Referrer
+          </button>
+          <button className="button" onClick={notifyPatient}>
+            Notify Patient
+          </button>
+          <button
+            className="button primary"
+            onClick={analyzePdf}
+            disabled={busy}
+          >
+            {busy ? "Analyzing…" : "Analyze PDF (LLM)"}
+          </button>
         </div>
       </div>
 
@@ -141,14 +219,6 @@ export default function ReferralDetail({
               ))}
             </div>
           ) : null}
-        </div>
-        <div className="section hstack" style={{ gap: 8 }}>
-          <button className="button" onClick={notifyReferrer}>
-            Fix & Notify Referrer
-          </button>
-          <button className="button" onClick={notifyPatient}>
-            Notify Patient
-          </button>
         </div>
       </div>
 

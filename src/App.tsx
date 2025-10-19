@@ -5,6 +5,7 @@ import referralsFixture from './fixtures/referrals.json'
 import Worklist from './components/Worklist'
 import ReferralDetail from './components/ReferralDetail'
 import { Chip } from './components/Badges'
+import { extractPdfText } from './lib/remote'
 
 type QueueItem = { id: string, action: string, ts: number }
 
@@ -16,6 +17,7 @@ export default function App(){
   const [lowConnectivity, setLowConnectivity] = useState(false)
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [useLLM, setUseLLM] = useState(false)
+  const [ingested, setIngested] = useState<Record<string, boolean>>({})
 
   function enqueue(action:string){
     const item: QueueItem = { id: Math.random().toString(36).slice(2), action, ts: Date.now() }
@@ -30,6 +32,55 @@ export default function App(){
     if (!active && items.length) setActiveId(items[0].id)
   },[items, active])
 
+  useEffect(() => {
+    if (!active) return
+
+    // If we've already ingested this referral, skip
+    if (ingested[active.id]) return
+
+    // Find a PDF document
+    const pdfDoc = active.documents?.find(d => /\.pdf$/i.test(d.filename))
+    if (!pdfDoc) {
+      setIngested(prev => ({ ...prev, [active.id]: true }))
+      return
+    }
+
+    // If the document already has substantive text, skip re-extract
+    if (pdfDoc.text && pdfDoc.text.trim().length > 60) {
+      setIngested(prev => ({ ...prev, [active.id]: true }))
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const path = `/docs/${pdfDoc.filename}`
+        const text = await extractPdfText(path)
+        if (cancelled) return
+        if (!text) {
+          setIngested(prev => ({ ...prev, [active.id]: true }))
+          return
+        }
+        // Update only the active referral in local state with extracted text and higher confidence
+        const updated = {
+          ...active,
+          documents: active.documents.map(d =>
+            d.id === pdfDoc.id ? { ...d, text, confidence: Math.max(d.confidence ?? 0, 0.98) } : d
+          )
+        }
+        setItems(prev => prev.map(r => (r.id === updated.id ? (updated as Referral) : r)))
+      } catch (e) {
+        console.warn('Auto-ingest PDF failed', e)
+      } finally {
+        if (!cancelled) setIngested(prev => ({ ...prev, [active.id]: true }))
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [active, ingested, extractPdfText])
+
   return (
     <div className="container">
       <div className="header">
@@ -41,7 +92,8 @@ export default function App(){
           </div>
         </div>
         <div className="toolbar">
-          <div className="pill">Demo mode · fixtures</div>\n          <button className="button ghost" onClick={()=>setUseLLM(v=>!v)}>{useLLM ? 'ChatGPT: ON' : 'ChatGPT: OFF'}</button>
+          <div className="pill">Demo mode · fixtures</div>
+          <button className="button ghost" onClick={()=>setUseLLM(v=>!v)}>{useLLM ? 'ChatGPT: ON' : 'ChatGPT: OFF'}</button>
           <button className="button ghost" onClick={()=>setLowConnectivity(v=>!v)}>
             {lowConnectivity ? 'Low Connectivity: ON' : 'Low Connectivity: OFF'}
           </button>
