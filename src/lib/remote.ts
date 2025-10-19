@@ -39,3 +39,21 @@ export async function extractPdfText(pdfPathOrUrl: string): Promise<string> {
   const data = await r.json();
   return (data.text ?? "").trim();
 }
+
+export type BundleEval = {
+  summary: string;
+  messages: { referrerAsk: string; patientSMS: string };
+  completeness: CompletenessResult;
+  auth: AuthPrediction;
+};
+
+export async function evalBundleLLM(ref: Referral): Promise<BundleEval> {
+  const r = await fetch("/api/evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task: "bundle", referral: ref }),
+  });
+  if (!r.ok) throw new Error(`LLM bundle failed: ${r.status}`);
+  const data = await r.json();
+  return data.result as BundleEval;
+}

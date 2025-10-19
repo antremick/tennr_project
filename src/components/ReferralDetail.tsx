@@ -1,11 +1,7 @@
 import React, { useMemo, useState } from "react";
 import type { Referral, SlotOption } from "../types";
 import { assessCompleteness, predictAuth, suggestSlots } from "../lib/ai";
-import {
-  evalCompletenessLLM,
-  evalAuthLLM,
-  extractPdfText,
-} from "../lib/remote";
+import { evalBundleLLM, extractPdfText } from "../lib/remote";
 import CoverageCard from "./CoverageCard";
 import { Badge } from "./Badges";
 
@@ -27,34 +23,40 @@ export default function ReferralDetail({
   const slots = useMemo(() => suggestSlots(referral), [referral]);
   const [held, setHeld] = useState<SlotOption | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [aiSummary, setAiSummary] = useState('');
 
   React.useEffect(() => {
     let cancelled = false;
     async function run() {
       if (useLLM) {
         try {
-          const c = await evalCompletenessLLM(referral);
-          const a = await evalAuthLLM(referral);
+          const b = await evalBundleLLM(referral);
+          const mergedComp = {
+            ...b.completeness,
+            draftReferrerAsk: b.messages?.referrerAsk || '',
+            draftPatientSMS: b.messages?.patientSMS || ''
+          };
           if (!cancelled) {
-            setComp(c);
-            setAuth(a);
+            setComp(mergedComp);
+            setAuth(b.auth);
+            setAiSummary(b.summary || '');
           }
         } catch (e) {
-          console.warn("LLM fallback to local due to error", e);
+          console.warn('LLM fallback to local due to error', e);
           if (!cancelled) {
             setComp(assessCompleteness(referral));
             setAuth(predictAuth(referral));
+            setAiSummary('');
           }
         }
       } else {
         setComp(assessCompleteness(referral));
         setAuth(predictAuth(referral));
+        setAiSummary('');
       }
     }
     run();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [referral, useLLM]);
 
   async function analyzePdf() {
@@ -90,12 +92,15 @@ export default function ReferralDetail({
 
       // re-run evaluation (LLM if enabled)
       if (useLLM) {
-        const [c, a] = await Promise.all([
-          evalCompletenessLLM(updated),
-          evalAuthLLM(updated),
-        ]);
-        setComp(c);
-        setAuth(a);
+        const b = await evalBundleLLM(updated);
+        const mergedComp = {
+          ...b.completeness,
+          draftReferrerAsk: b.messages?.referrerAsk || '',
+          draftPatientSMS: b.messages?.patientSMS || ''
+        };
+        setComp(mergedComp);
+        setAuth(b.auth);
+        setAiSummary(b.summary || '');
       } else {
         setComp(assessCompleteness(updated));
         setAuth(predictAuth(updated));
@@ -222,6 +227,14 @@ export default function ReferralDetail({
         </div>
       </div>
 
+      {useLLM && aiSummary ? (
+        <div className="card">
+          <div className="pill">AI Summary</div>
+          <div className="section">
+            <div className="muted">{aiSummary}</div>
+          </div>
+        </div>
+      ) : null}
       <CoverageCard cov={referral.coverage271} />
 
       <div className="card">
