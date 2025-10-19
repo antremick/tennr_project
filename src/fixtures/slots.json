@@ -1,0 +1,32 @@
+[
+  {
+    "provider": "Heart & Vascular Rural Clinic",
+    "start": "2025-10-22T15:00:00Z",
+    "modality": "in-person",
+    "driveMinutes": 55
+  },
+  {
+    "provider": "Frontier Cardio Tele",
+    "start": "2025-10-21T17:30:00Z",
+    "modality": "tele",
+    "driveMinutes": 0
+  },
+  {
+    "provider": "Plains Ortho",
+    "start": "2025-10-23T14:00:00Z",
+    "modality": "in-person",
+    "driveMinutes": 95
+  },
+  {
+    "provider": "Appalachia Pulmonology Tele",
+    "start": "2025-10-20T13:15:00Z",
+    "modality": "tele",
+    "driveMinutes": 0
+  },
+  {
+    "provider": "Regional Pulmonology",
+    "start": "2025-10-21T09:00:00Z",
+    "modality": "in-person",
+    "driveMinutes": 24
+  }
+]

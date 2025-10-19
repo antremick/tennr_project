@@ -1,0 +1,120 @@
+[
+  {
+    "id": "R1",
+    "receivedAt": "2025-10-19T12:10:00Z",
+    "patient": {
+      "name": "Delilah Carter",
+      "dob": "1974-03-22",
+      "phone": "+1-806-555-1414",
+      "zip": "79015"
+    },
+    "specialty": "Cardiology",
+    "dx": [
+      "I10",
+      "R07.9"
+    ],
+    "cpt": [
+      "93306"
+    ],
+    "source": "fax",
+    "distanceMiles": 48,
+    "telefit": true,
+    "coverage271": {
+      "active": true,
+      "payer": "TX Medicaid",
+      "plan": "STAR",
+      "inNetwork": true,
+      "deductibleRemaining": 120,
+      "copayEstimate": 10,
+      "priorAuthRequired": true,
+      "notes": "PCP gatekeeper applies; auth for echo"
+    },
+    "documents": [
+      {
+        "id": "D1",
+        "type": "fax",
+        "filename": "r1_fax.pdf",
+        "text": "Referral for echo due to chest pain... BP hx...",
+        "confidence": 0.86
+      }
+    ]
+  },
+  {
+    "id": "R2",
+    "receivedAt": "2025-10-19T12:18:00Z",
+    "patient": {
+      "name": "Miguel Alvarez",
+      "dob": "1959-06-10",
+      "phone": "+1-308-555-2323",
+      "zip": "68801"
+    },
+    "specialty": "Orthopedics",
+    "dx": [
+      "M17.12"
+    ],
+    "cpt": [
+      "73564"
+    ],
+    "source": "email",
+    "distanceMiles": 92,
+    "telefit": false,
+    "coverage271": {
+      "active": true,
+      "payer": "Medicare Advantage",
+      "plan": "PrairieCare HMO",
+      "inNetwork": true,
+      "deductibleRemaining": 0,
+      "copayEstimate": 40,
+      "priorAuthRequired": false,
+      "notes": "Radiology within network preferred site"
+    },
+    "documents": [
+      {
+        "id": "D2",
+        "type": "email",
+        "filename": "r2_email.pdf",
+        "text": "Referral for knee pain x 9 months; x-ray ordered",
+        "confidence": 0.74
+      }
+    ]
+  },
+  {
+    "id": "R3",
+    "receivedAt": "2025-10-19T12:25:00Z",
+    "patient": {
+      "name": "Kathy Nguyen",
+      "dob": "1987-01-05",
+      "phone": "+1-276-555-9981",
+      "zip": "24210"
+    },
+    "specialty": "Pulmonology",
+    "dx": [
+      "J45.40"
+    ],
+    "cpt": [
+      "94010"
+    ],
+    "source": "portal",
+    "distanceMiles": 18,
+    "telefit": true,
+    "coverage271": {
+      "active": true,
+      "payer": "Commercial",
+      "plan": "Bronze PPO",
+      "inNetwork": true,
+      "deductibleRemaining": 1800,
+      "copayEstimate": 60,
+      "priorAuthRequired": false,
+      "notes": "High deductible plan"
+    },
+    "documents": [
+      {
+        "id": "D3",
+        "type": "portal",
+        "filename": "r3_export.csv",
+        "text": "Frequent SOB, spirometry requested",
+        "confidence": 0.91
+      }
+    ]
+  }
+]
