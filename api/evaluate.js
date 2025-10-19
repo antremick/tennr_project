@@ -1,6 +1,6 @@
 // api/evaluate.js
 // Enhanced: robust JSON body parsing, OpenAI header forwarding, optional debug raw output
-export const config = { runtime: 'nodejs18.x' }
+export const config = { runtime: 'nodejs' }
 
 export default async function handler(req, res) {
   try {
