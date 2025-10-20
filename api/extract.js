@@ -1,7 +1,7 @@
 // api/extract.js
 // Node serverless fn that downloads a PDF (public/docs or remote URL) and extracts text.
 // Requires: `npm i pdf-parse`
-export const config = { runtime: "nodejs18" };
+export const config = { runtime: "nodejs" };
 
 export default async function handler(req, res) {
   try {
