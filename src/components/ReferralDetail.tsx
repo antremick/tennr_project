@@ -96,6 +96,7 @@ export default function ReferralDetail({
 
       // re-run evaluation (LLM if enabled)
       if (useLLM) {
+        console.log("Calling evalBundleLLM with updated referral:", updated);
         const b = await evalBundleLLM(updated);
         const mergedComp = {
           ...b.completeness,
@@ -111,7 +112,21 @@ export default function ReferralDetail({
       }
     } catch (e: any) {
       console.error("analyzePdf failed", e);
-      alert("Analyze PDF failed: " + (e?.message || e));
+
+      // Provide more specific error messages
+      let errorMessage = "Analyze PDF failed: ";
+      if (e?.message?.includes("400")) {
+        errorMessage +=
+          "Invalid request format. Please check the referral data.";
+      } else if (e?.message?.includes("429")) {
+        errorMessage += "Rate limit exceeded. Please try again in a moment.";
+      } else if (e?.message?.includes("500")) {
+        errorMessage += "Server error. Please try again later.";
+      } else {
+        errorMessage += e?.message || e;
+      }
+
+      alert(errorMessage);
     } finally {
       setBusy(false);
     }
@@ -201,7 +216,7 @@ export default function ReferralDetail({
             onClick={analyzePdf}
             disabled={busy}
           >
-            {busy ? "Analyzing…" : "Analyze PDF (LLM)"}
+            {busy ? "Analyzing…" : "Analyze PDF (LLM - Not Implemented)"}
           </button>
         </div>
       </div>

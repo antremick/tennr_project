@@ -197,7 +197,28 @@ export default async function handler(req, res) {
 
     const { task, referral } = body || {};
     if (!task || !referral) {
+      console.error("Missing required fields:", {
+        task,
+        hasReferral: !!referral,
+        bodyKeys: Object.keys(body || {}),
+      });
       res.status(400).json({ error: "Missing task or referral" });
+      return;
+    }
+
+    // Validate referral structure
+    if (!referral.id || !referral.patient || !referral.specialty) {
+      console.error("Invalid referral structure:", {
+        hasId: !!referral.id,
+        hasPatient: !!referral.patient,
+        hasSpecialty: !!referral.specialty,
+        referralKeys: Object.keys(referral || {}),
+      });
+      res
+        .status(400)
+        .json({
+          error: "Invalid referral structure - missing required fields",
+        });
       return;
     }
 
