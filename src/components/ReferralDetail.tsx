@@ -3,6 +3,8 @@ import type { Referral, SlotOption } from "../types";
 import { assessCompleteness, predictAuth, suggestSlots } from "../lib/ai";
 import { evalBundleLLM, extractPdfText } from "../lib/remote";
 import CoverageCard from "./CoverageCard";
+import DistanceAnalysis from "./DistanceAnalysis";
+import InsuranceAnalysis from "./InsuranceAnalysis";
 import { Badge } from "./Badges";
 
 export default function ReferralDetail({
@@ -23,7 +25,7 @@ export default function ReferralDetail({
   const slots = useMemo(() => suggestSlots(referral), [referral]);
   const [held, setHeld] = useState<SlotOption | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  const [aiSummary, setAiSummary] = useState('');
+  const [aiSummary, setAiSummary] = useState("");
 
   React.useEffect(() => {
     let cancelled = false;
@@ -33,30 +35,32 @@ export default function ReferralDetail({
           const b = await evalBundleLLM(referral);
           const mergedComp = {
             ...b.completeness,
-            draftReferrerAsk: b.messages?.referrerAsk || '',
-            draftPatientSMS: b.messages?.patientSMS || ''
+            draftReferrerAsk: b.messages?.referrerAsk || "",
+            draftPatientSMS: b.messages?.patientSMS || "",
           };
           if (!cancelled) {
             setComp(mergedComp);
             setAuth(b.auth);
-            setAiSummary(b.summary || '');
+            setAiSummary(b.summary || "");
           }
         } catch (e) {
-          console.warn('LLM fallback to local due to error', e);
+          console.warn("LLM fallback to local due to error", e);
           if (!cancelled) {
             setComp(assessCompleteness(referral));
             setAuth(predictAuth(referral));
-            setAiSummary('');
+            setAiSummary("");
           }
         }
       } else {
         setComp(assessCompleteness(referral));
         setAuth(predictAuth(referral));
-        setAiSummary('');
+        setAiSummary("");
       }
     }
     run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [referral, useLLM]);
 
   async function analyzePdf() {
@@ -95,12 +99,12 @@ export default function ReferralDetail({
         const b = await evalBundleLLM(updated);
         const mergedComp = {
           ...b.completeness,
-          draftReferrerAsk: b.messages?.referrerAsk || '',
-          draftPatientSMS: b.messages?.patientSMS || ''
+          draftReferrerAsk: b.messages?.referrerAsk || "",
+          draftPatientSMS: b.messages?.patientSMS || "",
         };
         setComp(mergedComp);
         setAuth(b.auth);
-        setAiSummary(b.summary || '');
+        setAiSummary(b.summary || "");
       } else {
         setComp(assessCompleteness(updated));
         setAuth(predictAuth(updated));
@@ -235,6 +239,23 @@ export default function ReferralDetail({
           </div>
         </div>
       ) : null}
+
+      <DistanceAnalysis
+        distanceMiles={referral.distanceMiles}
+        telefit={referral.telefit}
+        patientName={referral.patient.name}
+        onNotifyPatient={notifyPatient}
+      />
+
+      <InsuranceAnalysis
+        coverage={referral.coverage271}
+        patientName={referral.patient.name}
+        specialty={referral.specialty}
+        dx={referral.dx}
+        cpt={referral.cpt}
+        onNotifyPatient={notifyPatient}
+      />
+
       <CoverageCard cov={referral.coverage271} />
 
       <div className="card">
