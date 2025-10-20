@@ -3,27 +3,52 @@
 // + Self rate-limiting (token bucket), retry/backoff, payload trimming
 export const config = { runtime: "nodejs" };
 
-// --- best-effort global limiter (per warm instance) ---
-const _rl = { capacity: 2, refillPerSec: 1, tokens: 2, last: Date.now() };
+// --- improved global limiter (per warm instance) ---
+const _rl = {
+  capacity: 10, // Increased capacity
+  refillPerSec: 2, // Increased refill rate
+  tokens: 10,
+  last: Date.now(),
+  queue: [], // Queue for pending requests
+  processing: false,
+};
+
 async function throttleGlobal() {
-  const now = Date.now();
-  const elapsed = (now - _rl.last) / 1000;
-  _rl.tokens = Math.min(_rl.capacity, _rl.tokens + elapsed * _rl.refillPerSec);
-  _rl.last = now;
-  if (_rl.tokens >= 1) {
-    _rl.tokens -= 1;
-    return;
+  return new Promise((resolve) => {
+    _rl.queue.push(resolve);
+    processQueue();
+  });
+}
+
+async function processQueue() {
+  if (_rl.processing || _rl.queue.length === 0) return;
+
+  _rl.processing = true;
+
+  while (_rl.queue.length > 0) {
+    const now = Date.now();
+    const elapsed = (now - _rl.last) / 1000;
+    _rl.tokens = Math.min(
+      _rl.capacity,
+      _rl.tokens + elapsed * _rl.refillPerSec
+    );
+    _rl.last = now;
+
+    if (_rl.tokens >= 1) {
+      _rl.tokens -= 1;
+      const resolve = _rl.queue.shift();
+      resolve();
+    } else {
+      // Wait for next token
+      const need = 1 - _rl.tokens;
+      const waitMs =
+        Math.ceil((need / _rl.refillPerSec) * 1000) +
+        Math.floor(Math.random() * 200);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
   }
-  const need = 1 - _rl.tokens;
-  const waitMs =
-    Math.ceil((need / _rl.refillPerSec) * 1000) +
-    Math.floor(Math.random() * 120);
-  await new Promise((r) => setTimeout(r, waitMs));
-  const now2 = Date.now();
-  const elapsed2 = (now2 - _rl.last) / 1000;
-  _rl.tokens = Math.min(_rl.capacity, _rl.tokens + elapsed2 * _rl.refillPerSec);
-  _rl.last = now2;
-  _rl.tokens = Math.max(0, _rl.tokens - 1);
+
+  _rl.processing = false;
 }
 
 // trim payload to cut tokens
@@ -38,58 +63,104 @@ function sanitizeReferral(r) {
   return copy;
 }
 
-async function callOpenAIWithRetries(payload, key, maxAttempts = 4) {
+async function callOpenAIWithRetries(payload, key, maxAttempts = 5) {
   let attempt = 0,
     lastErrText = "",
     lastHeaders = {};
+
   while (attempt < maxAttempts) {
     attempt++;
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify(payload),
-    });
 
-    lastHeaders = {
-      limitRequests: resp.headers.get("x-ratelimit-limit-requests"),
-      remainingRequests: resp.headers.get("x-ratelimit-remaining-requests"),
-      resetRequests: resp.headers.get("x-ratelimit-reset-requests"),
-      limitTokens: resp.headers.get("x-ratelimit-limit-tokens"),
-      remainingTokens: resp.headers.get("x-ratelimit-remaining-tokens"),
-      resetTokens: resp.headers.get("x-ratelimit-reset-tokens"),
-      reqId: resp.headers.get("x-request-id"),
-      apiModel: resp.headers.get("openai-model"),
-      processingMs: resp.headers.get("openai-processing-ms"),
-    };
+    try {
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify(payload),
+        timeout: 30000, // 30 second timeout
+      });
 
-    if (resp.ok) return { resp, rate: lastHeaders };
+      lastHeaders = {
+        limitRequests: resp.headers.get("x-ratelimit-limit-requests"),
+        remainingRequests: resp.headers.get("x-ratelimit-remaining-requests"),
+        resetRequests: resp.headers.get("x-ratelimit-reset-requests"),
+        limitTokens: resp.headers.get("x-ratelimit-limit-tokens"),
+        remainingTokens: resp.headers.get("x-ratelimit-remaining-tokens"),
+        resetTokens: resp.headers.get("x-ratelimit-reset-tokens"),
+        reqId: resp.headers.get("x-request-id"),
+        apiModel: resp.headers.get("openai-model"),
+        processingMs: resp.headers.get("openai-processing-ms"),
+      };
 
-    const status = resp.status;
-    lastErrText = await resp.text().catch(() => "(no body)");
-    const retryable =
-      status === 429 ||
-      status === 500 ||
-      status === 502 ||
-      status === 503 ||
-      status === 504;
-    if (!retryable || attempt >= maxAttempts)
-      return { resp, rate: lastHeaders, errText: lastErrText };
+      if (resp.ok) return { resp, rate: lastHeaders };
 
-    const retryAfter = Number(resp.headers.get("retry-after") || 0);
-    const base = retryAfter
-      ? retryAfter * 1000
-      : 400 * Math.pow(2, attempt - 1);
-    const jitter = Math.floor(Math.random() * 200);
-    const delay = Math.min(4000, base + jitter);
-    console.warn(
-      `[eval] retryable ${status} attempt ${attempt}/${maxAttempts}; waiting ${delay}ms`,
-      lastHeaders
-    );
-    await new Promise((r) => setTimeout(r, delay));
+      const status = resp.status;
+      lastErrText = await resp.text().catch(() => "(no body)");
+
+      // More specific retry logic for 429 errors
+      const retryable =
+        status === 429 ||
+        status === 500 ||
+        status === 502 ||
+        status === 503 ||
+        status === 504;
+
+      if (!retryable || attempt >= maxAttempts) {
+        return { resp, rate: lastHeaders, errText: lastErrText };
+      }
+
+      // Improved backoff strategy
+      let delay;
+      if (status === 429) {
+        // For rate limits, respect the retry-after header or use longer delays
+        const retryAfter = Number(resp.headers.get("retry-after") || 0);
+        if (retryAfter > 0) {
+          delay = retryAfter * 1000;
+        } else {
+          // Exponential backoff with longer base for 429
+          delay = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
+        }
+      } else {
+        // For other retryable errors, use shorter delays
+        delay = Math.min(8000, 500 * Math.pow(1.5, attempt - 1));
+      }
+
+      // Add jitter to prevent thundering herd
+      const jitter = Math.floor(Math.random() * Math.min(1000, delay * 0.1));
+      delay += jitter;
+
+      console.warn(
+        `[eval] retryable ${status} attempt ${attempt}/${maxAttempts}; waiting ${Math.round(
+          delay
+        )}ms`,
+        {
+          remainingRequests: lastHeaders.remainingRequests,
+          remainingTokens: lastHeaders.remainingTokens,
+          resetRequests: lastHeaders.resetRequests,
+        }
+      );
+
+      await new Promise((r) => setTimeout(r, delay));
+    } catch (error) {
+      // Handle network errors
+      if (attempt >= maxAttempts) {
+        return {
+          errText: `Network error: ${error.message}`,
+          rate: lastHeaders,
+        };
+      }
+
+      const delay = Math.min(5000, 1000 * Math.pow(1.5, attempt - 1));
+      console.warn(
+        `[eval] network error attempt ${attempt}/${maxAttempts}; waiting ${delay}ms`,
+        error.message
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
   }
+
   return { errText: lastErrText, rate: lastHeaders };
 }
 
@@ -212,15 +283,41 @@ Strict JSON only.`;
       apiModel = rate?.apiModel,
       processingMs = rate?.processingMs;
     if (!resp || !resp.ok) {
-      console.error("OpenAI error", resp?.status, reqId, errText);
-      res
-        .status(resp?.status || 502)
-        .json({
-          error: "OpenAI error",
-          detail: errText,
-          openai: { reqId, apiModel, processingMs },
-          rate,
-        });
+      const status = resp?.status || 502;
+      const isRateLimit = status === 429;
+
+      console.error("OpenAI error", {
+        status,
+        reqId,
+        errText,
+        remainingRequests: rate?.remainingRequests,
+        remainingTokens: rate?.remainingTokens,
+        resetRequests: rate?.resetRequests,
+        isRateLimit,
+      });
+
+      // Provide more helpful error messages for rate limits
+      let errorMessage = "OpenAI error";
+      let detail = errText;
+
+      if (isRateLimit) {
+        errorMessage = "Rate limit exceeded";
+        if (rate?.remainingRequests === "0") {
+          detail = "Request limit reached. Please try again later.";
+        } else if (rate?.remainingTokens === "0") {
+          detail = "Token limit reached. Please try again later.";
+        } else {
+          detail = "Rate limit exceeded. Please try again in a moment.";
+        }
+      }
+
+      res.status(status).json({
+        error: errorMessage,
+        detail,
+        openai: { reqId, apiModel, processingMs },
+        rate,
+        retryAfter: isRateLimit ? rate?.resetRequests : undefined,
+      });
       return;
     }
 
@@ -230,14 +327,12 @@ Strict JSON only.`;
       end = content.lastIndexOf("}");
     if (start === -1 || end === -1) {
       console.error("Model did not return JSON", reqId, content);
-      res
-        .status(502)
-        .json({
-          error: "Model did not return JSON",
-          raw: debug ? content : undefined,
-          openai: { reqId, apiModel, processingMs },
-          rate,
-        });
+      res.status(502).json({
+        error: "Model did not return JSON",
+        raw: debug ? content : undefined,
+        openai: { reqId, apiModel, processingMs },
+        rate,
+      });
       return;
     }
 
@@ -246,14 +341,12 @@ Strict JSON only.`;
       parsed = JSON.parse(content.slice(start, end + 1));
     } catch (e) {
       console.error("Failed to parse JSON", reqId, e, content);
-      res
-        .status(502)
-        .json({
-          error: "Failed to parse JSON from model",
-          raw: debug ? content : undefined,
-          openai: { reqId, apiModel, processingMs },
-          rate,
-        });
+      res.status(502).json({
+        error: "Failed to parse JSON from model",
+        raw: debug ? content : undefined,
+        openai: { reqId, apiModel, processingMs },
+        rate,
+      });
       return;
     }
 
